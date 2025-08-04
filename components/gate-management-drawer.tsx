@@ -34,7 +34,7 @@ import {
 interface GateEntry {
   id: string
   vehicleNumber: string
-  status: "not-started" | "gate-in" | "gate-pass-generated" | "tare-weight-captured" | "loading" | "gross-weight-captured" | "gate-out" | "completed" | "rejected" | "cancelled"
+  status: "not-started" | "gate-in" | "gate-pass-generated" | "tare-weight-captured" | "loading-in-dock" | "loading" | "gross-weight-captured" | "gate-out" | "completed" | "rejected" | "cancelled"
   driver: {
     name: string
     verified: boolean
@@ -242,15 +242,50 @@ export default function GateManagementDrawer({
   }
 
   // Generate gate pass with auto dock assignment
+  const findAvailableDock = () => {
+    try {
+      const gateEntriesData = localStorage.getItem('gateEntries')
+      if (gateEntriesData) {
+        const gateEntries: GateEntry[] = JSON.parse(gateEntriesData)
+        
+        // Find vehicles currently occupying docks (loading-in-dock, loading, or not yet completed)
+        const occupiedDocks = gateEntries
+          .filter(entry => 
+            entry.assignedDock && 
+            (entry.status === "loading-in-dock" || entry.status === "loading")
+          )
+          .map(entry => entry.assignedDock)
+        
+        console.log('Occupied docks:', occupiedDocks)
+        
+        // Find available docks
+        const allDocks = ["Dock 1", "Dock 2", "Dock 3", "Dock 4", "Dock 5"]
+        const availableDocks = allDocks.filter(dock => !occupiedDocks.includes(dock))
+        
+        console.log('Available docks:', availableDocks)
+        
+        // Return first available dock, or fallback to random if all occupied
+        return availableDocks.length > 0 
+          ? availableDocks[0] 
+          : allDocks[Math.floor(Math.random() * allDocks.length)]
+      }
+    } catch (error) {
+      console.error('Error finding available dock:', error)
+    }
+    
+    // Fallback to random dock
+    const allDocks = ["Dock 1", "Dock 2", "Dock 3", "Dock 4", "Dock 5"]
+    return allDocks[Math.floor(Math.random() * allDocks.length)]
+  }
+
   const generateGatePass = () => {
     setIsProcessing(true)
     
     // Auto-assign available dock
-    const availableDocks = ["Dock 1", "Dock 2", "Dock 3", "Dock 4", "Dock 5"]
-    const randomDock = availableDocks[Math.floor(Math.random() * availableDocks.length)]
+    const assignedDock = findAvailableDock()
     
     setTimeout(() => {
-      setAssignedDock(randomDock)
+      setAssignedDock(assignedDock)
       setIsProcessing(false)
       
       // Update entry status and close drawer
@@ -265,7 +300,7 @@ export default function GateManagementDrawer({
             licenseNumber: licenseNumber,
             saarathiVerified: driverVerified
           },
-          assignedDock: randomDock,
+          assignedDock: assignedDock,
           gatePassNumber: `GP-${Date.now()}`
         }
         onUpdate(updatedEntry)
@@ -332,15 +367,18 @@ export default function GateManagementDrawer({
     
     setTimeout(() => {
       const startTime = new Date().toISOString()
+      // Auto-assign dock if not already assigned (use smart assignment)
+      const dock = entry?.assignedDock || findAvailableDock()
       setIsProcessing(false)
       
-      // Update entry and close drawer
+      // Update entry and close drawer - set status to loading-in-dock
       if (entry) {
         const updatedEntry: GateEntry = {
           ...entry,
-          status: "loading",
+          status: "loading-in-dock",
           loadingIncharge: loadingIncharge,
-          loadingStartTime: startTime
+          loadingStartTime: startTime,
+          assignedDock: dock
         }
         onUpdate(updatedEntry)
         onClose()
@@ -350,24 +388,57 @@ export default function GateManagementDrawer({
 
   // Capture gross weight
   const captureGrossWeight = () => {
+    // Check if vehicle is still in loading-in-dock status (checklist not completed)
+    if (entry?.status === "loading-in-dock") {
+      alert("Please complete the loading checklist at the dock before capturing gross weight.")
+      return
+    }
+    
     setIsWeighingInProgress(true)
     
-    // Simulate weighbridge reading
+    // Play beep sound for successful weighing
+    const beep = () => {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+      
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+      
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime) // 800Hz beep
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
+      
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.3)
+    }
+    
+    // Simulate weighbridge reading for exactly 4 seconds
     setTimeout(() => {
-      const weight = (tareWeight || 12000) + Math.floor(Math.random() * 10000) + 5000 // Add 5-15 tons to tare
+      const weight = (tareWeight || 15000) + Math.floor(Math.random() * 10000) + 10000 // Add 10-20 tons to tare
+      
+      // Play beep sound
+      try {
+        beep()
+      } catch (error) {
+        console.log("Audio not supported:", error)
+      }
+      
       setGrossWeight(weight)
       setIsWeighingInProgress(false)
       
-      // Update entry and close drawer
-      if (entry) {
-        const updatedEntry: GateEntry = {
-          ...entry,
-          status: "gross-weight-captured",
-          grossWeight: weight
+      // Update entry and close drawer after showing success for 2 seconds
+      setTimeout(() => {
+        if (entry) {
+          const updatedEntry: GateEntry = {
+            ...entry,
+            status: "gross-weight-captured",
+            grossWeight: weight
+          }
+          onUpdate(updatedEntry)
+          onClose()
         }
-        onUpdate(updatedEntry)
-        onClose()
-      }
+      }, 2000)
     }, 4000)
   }
 
@@ -863,59 +934,95 @@ export default function GateManagementDrawer({
               <CardContent className="space-y-4">
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
                   <div className="text-sm font-medium text-slate-700 mb-2">
-                    Previous Weights
+                    Previous Measurements
                   </div>
                   <div className="text-sm text-slate-600">
-                    Tare Weight: {entry.tareWeight?.toLocaleString()} kg
+                    Tare Weight: {entry.tareWeight ? `${(entry.tareWeight / 1000).toFixed(1)} Tons` : 'N/A'}
                   </div>
                 </div>
                 
                 {!grossWeight ? (
                   <div className="space-y-4">
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <div className="text-yellow-800 font-medium">
-                        Position loaded vehicle on weighbridge
-                      </div>
-                    </div>
-                    
-                    <Button onClick={captureGrossWeight} disabled={isWeighingInProgress} className="w-full">
-                      {isWeighingInProgress ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Capturing Gross Weight...
-                        </>
-                      ) : (
-                        'Capture Gross Weight'
-                      )}
-                    </Button>
-                    
-                    {isWeighingInProgress && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                        <div className="text-blue-800 font-medium mb-2">
-                          🏗️ Hardware Integration: Weighbridge Active (WB001)
+                    {!isWeighingInProgress ? (
+                      <>
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                          <div className="text-gray-800 font-medium">
+                            Ready to capture loaded vehicle weight
+                          </div>
+                          <div className="text-sm text-gray-700 mt-1">
+                            Click below to start weighbridge reading for gross weight
+                          </div>
                         </div>
-                        <div className="text-sm text-blue-700 mb-2">
-                          Loaded vehicle positioned on weighbridge - Capturing gross weight...
+                        
+                        <Button onClick={captureGrossWeight} className="w-full bg-blue-600 hover:bg-blue-700">
+                          <Scale className="h-4 w-4 mr-2" />
+                          START GROSS WEIGHT CAPTURE
+                        </Button>
+                      </>
+                    ) : (
+                      <div className="space-y-4">
+                        {/* Weighbridge simulation UI - Yellow theme during loading */}
+                        <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-6 aspect-video flex flex-col items-center justify-center text-center">
+                          <Scale className="h-16 w-16 text-yellow-600 mb-4 animate-pulse" />
+                          <div className="text-lg font-semibold text-yellow-800 mb-2">
+                            ⚖️ Weighbridge Active
+                          </div>
+                          <div className="text-sm text-yellow-700 mb-4">
+                            Reading gross weight from weighbridge...
+                          </div>
+                          <div className="w-full max-w-xs">
+                            <Progress value={85} className="h-2" />
+                          </div>
                         </div>
-                        <Progress value={80} className="mt-2" />
-                        <div className="text-xs text-blue-600 mt-1">
-                          Hardware sensors reading final weight with cargo
+                        
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                          <div className="text-yellow-800 font-medium mb-2">
+                            🏗️ Hardware Integration: Weighbridge Active (WB001)
+                          </div>
+                          <div className="text-sm text-yellow-700 mb-2">
+                            <Loader2 className="h-4 w-4 inline mr-2 animate-spin" />
+                            Loaded vehicle positioned on weighbridge - Capturing gross weight...
+                          </div>
+                          <div className="text-xs text-yellow-600">
+                            Reading final weight including cargo load
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <div className="flex items-center space-x-2 text-green-800">
-                        <CheckCircle className="h-5 w-5" />
-                        <span className="font-medium">Gross Weight Captured</span>
+                    {/* Success display - Green theme */}
+                    <div className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-6 aspect-video flex flex-col items-center justify-center text-center">
+                      <CheckCircle className="h-16 w-16 text-green-600 mb-4" />
+                      <div className="text-lg font-semibold text-green-800 mb-2">
+                        ✅ Gross Weight Successfully Captured
                       </div>
-                      <div className="text-3xl font-bold text-green-900 mt-2">
-                        {grossWeight?.toLocaleString()} kg
+                      <div className="text-3xl font-bold text-green-900 mb-2">
+                        {(grossWeight / 1000).toFixed(1)} Tons
                       </div>
-                      <div className="text-sm text-green-700 mt-1">
-                        Net Weight: {((grossWeight || 0) - (entry.tareWeight || 0)).toLocaleString()} kg
+                      <div className="text-sm text-green-700">
+                        🔊 Beep played - Weighbridge reading complete
+                      </div>
+                    </div>
+                    
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="text-sm font-medium text-blue-800 mb-2">
+                        Weight Calculation Summary
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-sm text-blue-700">
+                        <div>
+                          <span className="font-medium">Gross Weight:</span> {(grossWeight / 1000).toFixed(1)} Tons
+                        </div>
+                        <div>
+                          <span className="font-medium">Tare Weight:</span> {entry.tareWeight ? `${(entry.tareWeight / 1000).toFixed(1)} Tons` : 'N/A'}
+                        </div>
+                        <div className="col-span-2 pt-2 border-t border-blue-200">
+                          <span className="font-medium">Net Cargo Weight:</span>{' '}
+                          <span className="text-lg font-bold text-blue-900">
+                            {entry.tareWeight ? `${((grossWeight - entry.tareWeight) / 1000).toFixed(1)} Tons` : 'N/A'}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>

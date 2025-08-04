@@ -1,14 +1,56 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Filter, Calendar, Clock, Truck, TrendingUp, AlertCircle } from 'lucide-react'
+import { Settings, Filter, Calendar, Clock, Truck, TrendingUp, AlertCircle, CheckSquare } from 'lucide-react'
 import Sidebar from '@/components/sidebar'
+import DockLoadingDrawer from '@/components/dock-loading-drawer'
+
+interface GateEntry {
+  id: string
+  vehicleNumber: string
+  status: string
+  driver: {
+    name: string
+    verified: boolean
+    number: string
+    licenseNumber?: string
+    saarathiVerified?: boolean
+  }
+  transporter: string
+  loadNumber: string
+  tripUID: string
+  placeByDate: string
+  route: {
+    origin: string
+    destination: string
+    originCode: string
+    destinationCode: string
+  }
+  tags: string[]
+  gateInTime?: string
+  gateOutTime?: string
+  tareWeight?: number
+  grossWeight?: number
+  assignedDock?: string
+  gatePassNumber?: string
+  loadingIncharge?: string
+  loadingStartTime?: string
+  loadingEndTime?: string
+}
+
+interface LoadingChecklistItem {
+  id: string
+  category: string
+  item: string
+  completed: boolean
+  required: boolean
+}
 
 interface VehicleAssignment {
   id: string
@@ -22,6 +64,9 @@ interface VehicleAssignment {
   loadNumber: string
   location: string
   waitingTime?: string
+  checklistCompleted?: boolean
+  completedChecklist?: LoadingChecklistItem[]
+  loadingCompletedAt?: string
 }
 
 interface DockData {
@@ -34,93 +79,158 @@ export default function DockManagement() {
   const [selectedBranch, setSelectedBranch] = useState('all')
   const [activeDock, setActiveDock] = useState('dock1')
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleAssignment | null>(null)
+  const [loadingDrawerOpen, setLoadingDrawerOpen] = useState(false)
+  const [selectedLoadingVehicle, setSelectedLoadingVehicle] = useState<GateEntry | null>(null)
+  const [loadingVehicles, setLoadingVehicles] = useState<GateEntry[]>([])
+  const [completedChecklists, setCompletedChecklists] = useState<Record<string, LoadingChecklistItem[]>>({})
 
-  // Sample data matching the design
-  const dockData: DockData[] = [
-    {
-      id: 1,
-      name: 'DOCK 1',
-      vehicles: [
-        {
-          id: '1',
-          sno: 1,
-          vehicleNo: 'SKQ 12356JL',
-          transporterName: 'Kapoor Transport',
-          driverName: 'Ravi',
-          driverPhone: '9988776655',
-          turnAroundTime: '08:00 - 10:00',
-          currentStatus: 'Ongoing',
-          loadNumber: 'TN01B1234',
-          location: 'Bangalore, 560001',
-          waitingTime: '09h 15m'
-        },
-        {
-          id: '2',
-          sno: 2,
-          vehicleNo: 'SKQ 12789JL',
-          transporterName: 'Premium Transport',
-          driverName: 'Sita',
-          driverPhone: '9988776644',
-          turnAroundTime: '06:00 - 08:00',
-          currentStatus: 'Ongoing',
-          loadNumber: 'TN01B1234',
-          location: 'Delhi, 560001',
-          waitingTime: '09h 15m'
-        },
-        {
-          id: '3',
-          sno: 3,
-          vehicleNo: 'SKQ 12789JL',
-          transporterName: 'Automobile Transport',
-          driverName: 'Amit',
-          driverPhone: '9988776633',
-          turnAroundTime: '12:00 - 14:00',
-          currentStatus: 'Ongoing',
-          loadNumber: 'TN01B1234',
-          location: 'Bangalore, 560001',
-          waitingTime: '09h 15m'
-        },
-        {
-          id: '4',
-          sno: 4,
-          vehicleNo: 'SKQ 12789JL',
-          transporterName: 'Mountain logistic',
-          driverName: 'Vishnu',
-          driverPhone: '9988776655',
-          turnAroundTime: '10:00 - 12:00',
-          currentStatus: 'Ongoing',
-          loadNumber: 'TN01B1234',
-          location: 'Delhi, 560001',
-          waitingTime: '09h 15m'
+  // Get vehicles in loading status from localStorage (simulating real-time sync)
+  useEffect(() => {
+    const updateLoadingVehicles = () => {
+      try {
+        const gateEntriesData = localStorage.getItem('gateEntries')
+        
+        if (gateEntriesData) {
+          const gateEntries: GateEntry[] = JSON.parse(gateEntriesData)
+          
+          const vehiclesInLoading = gateEntries.filter(entry => 
+            entry.status === "loading-in-dock" || 
+            entry.status === "loading" || 
+            (entry.status === "gross-weight-captured" && entry.assignedDock) ||
+            (entry.status === "gate-out" && entry.assignedDock) ||
+            (entry.status === "completed" && entry.assignedDock)
+          )
+          
+          // Debug: Only log when there are loading vehicles
+          if (vehiclesInLoading.length > 0) {
+            console.log('Dock Management - Found loading vehicles:', vehiclesInLoading.map(v => ({
+              id: v.id,
+              vehicleNumber: v.vehicleNumber,
+              status: v.status,
+              assignedDock: v.assignedDock
+            })))
+          }
+          
+          setLoadingVehicles(vehiclesInLoading)
+        } else {
+          setLoadingVehicles([])
         }
-      ]
-    },
-    {
-      id: 2,
-      name: 'DOCK 2',
-      vehicles: []
-    },
-    {
-      id: 3,
-      name: 'DOCK 3',
-      vehicles: []
-    },
-    {
-      id: 4,
-      name: 'DOCK 4',
-      vehicles: []
-    },
-    {
-      id: 5,
-      name: 'DOCK 5',
-      vehicles: []
+      } catch (error) {
+        console.error('Error loading gate entries:', error)
+        setLoadingVehicles([])
+      }
     }
-  ]
+
+    // Initial load
+    updateLoadingVehicles()
+
+    // Poll for updates every 1 second for better responsiveness
+    const interval = setInterval(updateLoadingVehicles, 1000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleLoadingComplete = (vehicle: GateEntry, completedChecklist: LoadingChecklistItem[]) => {
+    // Store the completed checklist
+    setCompletedChecklists(prev => ({
+      ...prev,
+      [vehicle.id]: completedChecklist
+    }))
+    
+    // Update the loading vehicles list with new status
+    setLoadingVehicles(prev => prev.map(v => 
+      v.id === vehicle.id ? { ...vehicle, status: "loading" } : v
+    ))
+    
+    // Update gate management entries in localStorage
+    try {
+      const gateEntriesData = localStorage.getItem('gateEntries')
+      if (gateEntriesData) {
+        const gateEntries: GateEntry[] = JSON.parse(gateEntriesData)
+        const updatedEntries = gateEntries.map(entry => 
+          entry.id === vehicle.id ? { ...vehicle, status: "loading" } : entry
+        )
+        localStorage.setItem('gateEntries', JSON.stringify(updatedEntries))
+      }
+    } catch (error) {
+      console.error('Error updating gate entries:', error)
+    }
+    
+    console.log("Loading completed for vehicle:", vehicle.vehicleNumber, "Status changed to:", vehicle.status)
+  }
+
+  const handleStartLoading = (vehicle: GateEntry) => {
+    setSelectedLoadingVehicle(vehicle)
+    setLoadingDrawerOpen(true)
+  }
+
+  // Create dock data with vehicles from gate management loading status
+  const createDockData = (): DockData[] => {
+    const baseDocks = [
+      { id: 1, name: 'DOCK 1', vehicles: [] },
+      { id: 2, name: 'DOCK 2', vehicles: [] },
+      { id: 3, name: 'DOCK 3', vehicles: [] },
+      { id: 4, name: 'DOCK 4', vehicles: [] },
+      { id: 5, name: 'DOCK 5', vehicles: [] }
+    ]
+
+    // Add loading vehicles to appropriate docks
+    loadingVehicles.forEach((vehicle, index) => {
+      if (vehicle.assignedDock) {
+        console.log(`Processing vehicle: ${vehicle.vehicleNumber} assigned to ${vehicle.assignedDock}`)
+        const dockNumber = parseInt(vehicle.assignedDock.replace('Dock ', ''))
+        console.log(`Parsed dock number: ${dockNumber}`)
+        const dock = baseDocks.find(d => d.id === dockNumber)
+        
+        if (dock) {
+          console.log(`Found matching dock: ${dock.name}`)
+          const vehicleAssignment: VehicleAssignment = {
+            id: vehicle.id,
+            sno: dock.vehicles.length + 1,
+            vehicleNo: vehicle.vehicleNumber,
+            transporterName: vehicle.transporter,
+            driverName: vehicle.driver.name,
+            driverPhone: vehicle.driver.number,
+            turnAroundTime: vehicle.loadingStartTime ? 
+              `${new Date(vehicle.loadingStartTime).toLocaleTimeString()} - Loading` : 
+              'Loading in progress',
+            currentStatus: (completedChecklists[vehicle.id] || vehicle.status === "gross-weight-captured" || vehicle.status === "gate-out" || vehicle.status === "completed") ? 'Completed' : 'Ongoing',
+            checklistCompleted: !!completedChecklists[vehicle.id],
+            completedChecklist: completedChecklists[vehicle.id],
+            loadingCompletedAt: completedChecklists[vehicle.id] ? new Date().toISOString() : undefined,
+            loadNumber: vehicle.loadNumber,
+            location: `${vehicle.route.destination}, ${vehicle.route.destinationCode}`,
+            waitingTime: vehicle.loadingStartTime ? 
+              calculateWaitingTime(vehicle.loadingStartTime) : '0h 0m'
+          }
+          dock.vehicles.push(vehicleAssignment)
+          console.log(`Added vehicle to dock ${dock.name}, total vehicles: ${dock.vehicles.length}`)
+        } else {
+          console.log(`No dock found for dock number: ${dockNumber}`)
+        }
+      } else {
+        console.log(`Vehicle ${vehicle.vehicleNumber} has no assigned dock`)
+      }
+    })
+
+    return baseDocks
+  }
+
+  const calculateWaitingTime = (startTime: string): string => {
+    const start = new Date(startTime)
+    const now = new Date()
+    const diffMs = now.getTime() - start.getTime()
+    const hours = Math.floor(diffMs / (1000 * 60 * 60))
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+    return `${hours}h ${minutes}m`
+  }
+
+  const dockData = createDockData()
 
   const statsData = {
     totalVehiclesLoaded: 2,
     vehiclesCrossedSLA: 2,
-    currentlyLoading: 4,
+    currentlyLoading: loadingVehicles.length,
     avgLoadingTime: '09h 15m'
   }
 
@@ -190,6 +300,16 @@ export default function DockManagement() {
             </div>
           </div>
         </div>
+
+        {/* Loading Vehicles Debug Info */}
+        {loadingVehicles.length > 0 && (
+          <div className="px-6 py-2 bg-yellow-50 border-b border-yellow-200">
+            <div className="text-sm text-yellow-800">
+              <strong>Loading Vehicles Found:</strong> {loadingVehicles.length} | 
+              {loadingVehicles.map(v => `${v.vehicleNumber} (${v.status} in ${v.assignedDock})`).join(', ')}
+            </div>
+          </div>
+        )}
 
         {/* Stats Overview */}
         <div className="px-6 py-6 bg-white/90 backdrop-blur-sm">
@@ -290,13 +410,31 @@ export default function DockManagement() {
                     value={dock.name.toLowerCase().replace(' ', '')}
                     className="flex items-center space-x-2 data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg font-medium transition-all duration-200"
                   >
-                    {dock.name}
+                    <span>{dock.name}</span>
+                    {dock.vehicles.length > 0 && (
+                      <div className="flex items-center space-x-1">
+                        <div className={`w-2 h-2 rounded-full ${
+                          dock.vehicles.some(v => v.currentStatus === 'Ongoing') ? 'bg-orange-500' : 'bg-green-500'
+                        }`}></div>
+                        <span className="text-xs">({dock.vehicles.length})</span>
+                      </div>
+                    )}
                     {dock.name === 'DOCK 1' && <Settings className="h-3 w-3 ml-1" />}
                   </TabsTrigger>
                 ))}
               </TabsList>
               
               <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-4 text-xs text-slate-600 bg-slate-50 px-3 py-2 rounded-lg">
+                  <div className="flex items-center space-x-1">
+                    <div className="w-2 h-2 rounded-full bg-orange-500"></div>
+                    <span>Ongoing</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                    <span>Completed</span>
+                  </div>
+                </div>
                 <Button variant="outline" size="sm" className="border-slate-300 hover:bg-slate-50">
                   <Filter className="h-4 w-4 mr-2" />
                   Add Filter
@@ -328,19 +466,38 @@ export default function DockManagement() {
                     </TableHeader>
                     <TableBody>
                       {dock.vehicles.length > 0 ? (
-                        dock.vehicles.map((vehicle, index) => (
-                          <TableRow 
-                            key={vehicle.id}
-                            className="cursor-pointer hover:bg-slate-50/80 transition-colors duration-200 border-b border-slate-100 last:border-b-0"
-                            onClick={() => setSelectedVehicle(vehicle)}
-                          >
+                        dock.vehicles.map((vehicle, index) => {
+                          const isLoadingVehicle = loadingVehicles.some(lv => lv.id === vehicle.id)
+                          return (
+                            <TableRow 
+                              key={vehicle.id}
+                              className="cursor-pointer hover:bg-slate-50/80 transition-colors duration-200 border-b border-slate-100 last:border-b-0"
+                              onClick={() => {
+                                if (isLoadingVehicle) {
+                                  const loadingVehicle = loadingVehicles.find(lv => lv.id === vehicle.id)
+                                  if (loadingVehicle) {
+                                    handleStartLoading(loadingVehicle)
+                                  }
+                                } else {
+                                  setSelectedVehicle(vehicle)
+                                }
+                              }}
+                            >
                             <TableCell className="font-medium text-slate-700">{vehicle.sno}.</TableCell>
                             <TableCell>
                               <div className="flex items-center space-x-3">
                                 <div className="p-2 bg-blue-100 rounded-lg">
                                   <Truck className="h-4 w-4 text-blue-600" />
                                 </div>
-                                <span className="font-medium text-slate-900">{vehicle.vehicleNo}</span>
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-slate-900">{vehicle.vehicleNo}</span>
+                                  {loadingVehicles.some(lv => lv.id === vehicle.id) && (
+                                    <div className="flex items-center space-x-1 mt-1">
+                                      <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+                                      <span className="text-xs text-orange-600 font-medium">Steel Loading</span>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </TableCell>
                             <TableCell className="text-slate-700 font-medium">{vehicle.transporterName}</TableCell>
@@ -360,7 +517,8 @@ export default function DockManagement() {
                             </TableCell>
                             <TableCell>{getStatusBadge(vehicle.currentStatus)}</TableCell>
                           </TableRow>
-                        ))
+                          )
+                        })
                       ) : (
                         <TableRow>
                           <TableCell colSpan={6} className="text-center py-12 text-slate-500">
@@ -444,58 +602,102 @@ export default function DockManagement() {
           )}
           
           {/* Additional vehicle entries as shown in design */}
-          {currentDockData?.vehicles.slice(1).map((vehicle) => (
-            <div key={`sidebar-${vehicle.id}`} className="border border-slate-200 rounded-xl p-5 bg-white shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <Truck className="h-4 w-4 text-blue-600" />
+          {currentDockData?.vehicles.slice(1).map((vehicle) => {
+            const isLoadingVehicle = loadingVehicles.some(lv => lv.id === vehicle.id)
+            const loadingVehicle = loadingVehicles.find(lv => lv.id === vehicle.id)
+            
+            return (
+              <div 
+                key={`sidebar-${vehicle.id}`} 
+                className="border border-slate-200 rounded-xl p-5 bg-white shadow-sm hover:shadow-md transition-shadow duration-300 cursor-pointer"
+                onClick={() => {
+                  if (isLoadingVehicle && loadingVehicle) {
+                    handleStartLoading(loadingVehicle)
+                  }
+                }}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Truck className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-slate-900">{vehicle.loadNumber}</span>
+                      {isLoadingVehicle && (
+                        <div className="flex items-center space-x-1 mt-1">
+                          <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+                          <span className="text-xs text-orange-600 font-medium">Steel Loading Checklist</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <span className="font-semibold text-slate-900">{vehicle.loadNumber}</span>
-                </div>
-                <div className="flex items-center space-x-2 text-sm bg-orange-50 px-3 py-1 rounded-full">
-                  <Clock className="h-3 w-3 text-orange-600" />
-                  <span className="text-orange-700 font-medium">Waiting: {vehicle.waitingTime}</span>
-                </div>
-              </div>
-              
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center space-x-3 p-2 bg-slate-50 rounded-lg">
-                  <span className="text-lg">👤</span>
-                  <span className="font-medium text-slate-900">{vehicle.driverName}</span>
-                  <span className="text-lg">📞</span>
-                  <span className="text-slate-600">{vehicle.driverPhone}</span>
+                  <div className="flex items-center space-x-2 text-sm bg-orange-50 px-3 py-1 rounded-full">
+                    <Clock className="h-3 w-3 text-orange-600" />
+                    <span className="text-orange-700 font-medium">Waiting: {vehicle.waitingTime}</span>
+                  </div>
                 </div>
                 
-                <div className="flex items-start space-x-3 p-3 bg-green-50 rounded-lg border-l-4 border-green-400">
-                  <span className="text-lg">📍</span>
-                  <div>
-                    <div className="font-medium text-green-900">National Logistics Pvt Ltd</div>
-                    <div className="text-green-700">{vehicle.location}</div>
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center space-x-3 p-2 bg-slate-50 rounded-lg">
+                    <span className="text-lg">👤</span>
+                    <span className="font-medium text-slate-900">{vehicle.driverName}</span>
+                    <span className="text-lg">📞</span>
+                    <span className="text-slate-600">{vehicle.driverPhone}</span>
                   </div>
+                  
+                  <div className="flex items-start space-x-3 p-3 bg-green-50 rounded-lg border-l-4 border-green-400">
+                    <span className="text-lg">📍</span>
+                    <div>
+                      <div className="font-medium text-green-900">{vehicle.transporterName}</div>
+                      <div className="text-green-700">{vehicle.location}</div>
+                    </div>
+                  </div>
+                  
+                  {isLoadingVehicle && loadingVehicle && (
+                    <div className="flex items-start space-x-3 p-3 bg-orange-50 rounded-lg border-l-4 border-orange-400">
+                      <span className="text-lg">🏭</span>
+                      <div>
+                        <div className="font-medium text-orange-900">Steel Manufacturing</div>
+                        <div className="text-orange-700">Loading in {loadingVehicle.assignedDock}</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
-                <div className="flex items-start space-x-3 p-3 bg-red-50 rounded-lg border-l-4 border-red-400">
-                  <span className="text-lg">📍</span>
-                  <div>
-                    <div className="font-medium text-red-900">National Logistics Pvt Ltd</div>
-                    <div className="text-red-700">Delhi, 560001</div>
-                  </div>
+                <div className="mt-5 flex space-x-3">
+                  {isLoadingVehicle ? (
+                    <Button className="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium">
+                      <CheckSquare className="h-3 w-3 mr-1" />
+                      LOADING CHECKLIST
+                    </Button>
+                  ) : (
+                    <>
+                      <Button variant="outline" className="flex-1 text-xs font-medium border-slate-300 hover:bg-slate-50">
+                        VIEW DETAILS
+                      </Button>
+                      <Button className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white text-xs font-medium shadow-md">
+                        ALLOCATE
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
-              
-              <div className="mt-5 flex space-x-3">
-                <Button variant="outline" className="flex-1 text-xs font-medium border-slate-300 hover:bg-slate-50">
-                  VIEW DETAILS
-                </Button>
-                <Button className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white text-xs font-medium shadow-md">
-                  ALLOCATE
-                </Button>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
+
+      {/* Dock Loading Drawer */}
+      <DockLoadingDrawer
+        isOpen={loadingDrawerOpen}
+        onClose={() => {
+          setLoadingDrawerOpen(false)
+          setSelectedLoadingVehicle(null)
+        }}
+        vehicle={selectedLoadingVehicle}
+        onLoadingComplete={handleLoadingComplete}
+        initialChecklist={selectedLoadingVehicle ? completedChecklists[selectedLoadingVehicle.id] : undefined}
+      />
     </div>
   )
 }

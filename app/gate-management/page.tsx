@@ -1,17 +1,21 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Search, Truck, MapPin, FileText, Plus, Scale } from "lucide-react"
+import Link from "next/link"
 import Sidebar from "@/components/sidebar"
 import GateManagementDrawer from "@/components/gate-management-drawer"
 
 interface GateEntry {
   id: string
   vehicleNumber: string
-  status: "not-started" | "gate-in" | "gate-pass-generated" | "tare-weight-captured" | "loading" | "gross-weight-captured" | "gate-out" | "completed" | "rejected" | "cancelled"
+  status: "not-started" | "gate-in" | "gate-pass-generated" | "tare-weight-captured" | "loading-in-dock" | "loading" | "gross-weight-captured" | "gate-out" | "completed" | "rejected" | "cancelled"
   driver: {
     name: string
     verified: boolean
@@ -175,12 +179,224 @@ const mockGateEntries: GateEntry[] = [
 ]
 
 export default function GateManagementPage() {
-  const [gateEntries, setGateEntries] = useState<GateEntry[]>(mockGateEntries)
+  const [gateEntries, setGateEntries] = useState<GateEntry[]>(() => {
+    // Load from localStorage on initial render
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('gateEntries')
+        if (saved) {
+          const loadedEntries = JSON.parse(saved)
+          // Fix any entries with invalid dock assignments (dock numbers > 5)
+          const fixedEntries = loadedEntries.map((entry: GateEntry) => {
+            if (entry.assignedDock) {
+              const dockNumber = parseInt(entry.assignedDock.replace('Dock ', ''))
+              if (dockNumber > 5 || isNaN(dockNumber)) {
+                // Reassign to a valid dock (1-5)
+                const validDock = `Dock ${Math.floor(Math.random() * 5) + 1}`
+                console.log(`Fixed invalid dock assignment: ${entry.assignedDock} → ${validDock} for vehicle ${entry.vehicleNumber}`)
+                return { ...entry, assignedDock: validDock }
+              }
+            }
+            return entry
+          })
+          
+          
+          return fixedEntries
+        }
+        return mockGateEntries
+      } catch (error) {
+        console.error('Error loading gate entries:', error)
+        return mockGateEntries
+      }
+    }
+    return mockGateEntries
+  })
   const [activeTab, setActiveTab] = useState("All")
   const [selectedEntry, setSelectedEntry] = useState<GateEntry | null>(null)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [actionType, setActionType] = useState<"start-process" | "generate-gate-pass" | "capture-tare-weight" | "loading" | "capture-gross-weight" | "gate-out" | "view-details">("start-process")
   const [dateFilter, setDateFilter] = useState("CREATED ON - LAST 30 DAYS")
+  const [isAddVehicleOpen, setIsAddVehicleOpen] = useState(false)
+  const [newVehicleData, setNewVehicleData] = useState({
+    vehicleNumber: "",
+    driverName: "",
+    driverPhone: "",
+    transporter: "",
+    origin: "",
+    destination: ""
+  })
+
+  // Function to create a fresh test vehicle
+  const createFreshTestVehicle = () => {
+    const vehicleNumber = `FRESH${Math.floor(Math.random() * 9999).toString().padStart(4, '0')}`
+    const driverNames = ["Rajesh Kumar", "Priya Singh", "Amit Patel", "Sunita Sharma", "Vikram Gupta"]
+    const transporters = ["Test Transport Ltd", "Demo Logistics", "Sample Carriers", "Trial Freight", "Fresh Transport"]
+    
+    return {
+      id: `fresh-${Date.now()}`,
+      vehicleNumber: vehicleNumber,
+      status: "not-started" as const,
+      driver: {
+        name: driverNames[Math.floor(Math.random() * driverNames.length)],
+        verified: false,
+        number: `9${Math.floor(Math.random() * 900000000) + 100000000}`
+      },
+      transporter: transporters[Math.floor(Math.random() * transporters.length)],
+      loadNumber: `H-FRESH-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
+      tripUID: `T-FRESH-${Math.random().toString(36).substr(2, 3).toUpperCase()}`,
+      placeByDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-GB') + " 11:59 PM",
+      route: {
+        origin: "Delhi",
+        destination: "Mumbai", 
+        originCode: "110001",
+        destinationCode: "400001"
+      },
+      tags: ["Fresh", "Ready", "Outbound"]
+    }
+  }
+
+  // Function to reset localStorage and use fresh mock data
+  const resetData = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('gateEntries')
+      // Always include one fresh test vehicle for immediate testing
+      const freshVehicle = createFreshTestVehicle()
+      const resetEntries = [freshVehicle, ...mockGateEntries]
+      setGateEntries(resetEntries)
+      alert(`Data reset! Fresh test vehicle ${freshVehicle.vehicleNumber} added for testing.`)
+    }
+  }
+
+  // Function to add new vehicle
+  const addNewVehicle = () => {
+    if (!newVehicleData.vehicleNumber || !newVehicleData.driverName || !newVehicleData.driverPhone) {
+      alert('Please fill in all required fields (Vehicle Number, Driver Name, Driver Phone)')
+      return
+    }
+
+    const newEntry: GateEntry = {
+      id: `new-${Date.now()}`,
+      vehicleNumber: newVehicleData.vehicleNumber.toUpperCase(),
+      status: "not-started",
+      driver: {
+        name: newVehicleData.driverName,
+        verified: false,
+        number: newVehicleData.driverPhone
+      },
+      transporter: newVehicleData.transporter || "Transport Co.",
+      loadNumber: `H-NEW-${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+      tripUID: `T-NEW-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
+      placeByDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-GB') + " 11:59 PM",
+      route: {
+        origin: newVehicleData.origin || "Delhi",
+        destination: newVehicleData.destination || "Mumbai",
+        originCode: "110001",
+        destinationCode: "400001"
+      },
+      tags: ["New", "Outbound"]
+    }
+
+    setGateEntries(prev => [newEntry, ...prev])
+    setNewVehicleData({
+      vehicleNumber: "",
+      driverName: "",
+      driverPhone: "",
+      transporter: "",
+      origin: "",
+      destination: ""
+    })
+    setIsAddVehicleOpen(false)
+    alert(`New vehicle ${newEntry.vehicleNumber} added successfully!`)
+  }
+
+  // Function to quickly add test vehicle
+  const addQuickTestVehicle = () => {
+    const vehicleNumber = `TEST${Math.floor(Math.random() * 9999).toString().padStart(4, '0')}`
+    const driverNames = ["Arjun Singh", "Priya Sharma", "Vikram Patel", "Sunita Gupta", "Ravi Kumar"]
+    const transporters = ["Express Logistics", "Fast Transport", "Reliable Carriers", "Speed Logistics", "Quick Freight"]
+    const cities = [
+      {name: "Chennai", code: "600001"}, 
+      {name: "Bangalore", code: "560001"}, 
+      {name: "Hyderabad", code: "500001"},
+      {name: "Pune", code: "411001"},
+      {name: "Ahmedabad", code: "380001"}
+    ]
+
+    const origin = cities[Math.floor(Math.random() * cities.length)]
+    const destination = cities[Math.floor(Math.random() * cities.length)]
+
+    const newEntry: GateEntry = {
+      id: `quick-${Date.now()}`,
+      vehicleNumber: vehicleNumber,
+      status: "not-started",
+      driver: {
+        name: driverNames[Math.floor(Math.random() * driverNames.length)],
+        verified: false,
+        number: `9${Math.floor(Math.random() * 900000000) + 100000000}`
+      },
+      transporter: transporters[Math.floor(Math.random() * transporters.length)],
+      loadNumber: `H-QUICK-${Math.random().toString(36).substr(2, 4).toUpperCase()}`,
+      tripUID: `T-QUICK-${Math.random().toString(36).substr(2, 3).toUpperCase()}`,
+      placeByDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-GB') + " 11:59 PM",
+      route: {
+        origin: origin.name,
+        destination: destination.name,
+        originCode: origin.code,
+        destinationCode: destination.code
+      },
+      tags: ["Quick", "Test", "Outbound"]
+    }
+
+    setGateEntries(prev => [newEntry, ...prev])
+    alert(`Quick test vehicle ${newEntry.vehicleNumber} added!`)
+  }
+
+  // Save to localStorage whenever gateEntries changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('gateEntries', JSON.stringify(gateEntries))
+        
+        // Only log when there are vehicles with loading status
+        const loadingVehicles = gateEntries.filter(e => e.status === "loading-in-dock" || e.status === "loading")
+        if (loadingVehicles.length > 0) {
+          console.log('Gate Management - Vehicles in loading status:', loadingVehicles.map(v => ({
+            id: v.id,
+            vehicleNumber: v.vehicleNumber,
+            status: v.status,
+            assignedDock: v.assignedDock
+          })))
+        }
+      } catch (error) {
+        console.error('Error saving gate entries:', error)
+      }
+    }
+  }, [gateEntries])
+
+  // Listen for updates from dock management (polling approach)
+  useEffect(() => {
+    const pollForUpdates = () => {
+      if (typeof window !== 'undefined') {
+        try {
+          const saved = localStorage.getItem('gateEntries')
+          if (saved) {
+            const loadedEntries = JSON.parse(saved)
+            // Only update if there's actually a difference to avoid infinite loops
+            const currentSerialized = JSON.stringify(gateEntries)
+            const savedSerialized = JSON.stringify(loadedEntries)
+            if (currentSerialized !== savedSerialized) {
+              setGateEntries(loadedEntries)
+            }
+          }
+        } catch (error) {
+          console.error('Error loading gate entries updates:', error)
+        }
+      }
+    }
+
+    const interval = setInterval(pollForUpdates, 3000) // Poll every 3 seconds
+    return () => clearInterval(interval)
+  }, [gateEntries])
 
   const handleEntryClick = (entry: GateEntry) => {
     setSelectedEntry(entry)
@@ -204,6 +420,7 @@ export default function GateManagementPage() {
       "gate-in": { label: "GATE IN", className: "bg-blue-100 text-blue-700" },
       "gate-pass-generated": { label: "GATE PASS GENERATED", className: "bg-green-100 text-green-700" },
       "tare-weight-captured": { label: "TARE WEIGHT CAPTURED", className: "bg-yellow-100 text-yellow-700" },
+      "loading-in-dock": { label: "LOADING IN DOCK", className: "bg-orange-100 text-orange-700" },
       "loading": { label: "LOADING", className: "bg-orange-100 text-orange-700" },
       "gross-weight-captured": { label: "GROSS WEIGHT CAPTURED", className: "bg-purple-100 text-purple-700" },
       "gate-out": { label: "GATE OUT", className: "bg-indigo-100 text-indigo-700" },
@@ -257,14 +474,30 @@ export default function GateManagementPage() {
             CAPTURE LOADING INFO
           </Button>
         )
+      case "loading-in-dock":
+        return (
+          <div className="flex items-center space-x-2">
+            <Link href="/dock-management">
+              <Badge className="bg-orange-100 text-orange-700 text-xs hover:bg-orange-200 cursor-pointer transition-colors">
+                Loading in {entry.assignedDock} →
+              </Badge>
+            </Link>
+            <span className="text-xs text-gray-500">Click to view in dock management</span>
+          </div>
+        )
       case "loading":
         return (
-          <Button
-            onClick={() => handleActionClick(entry, "capture-gross-weight")}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 h-8"
-          >
-            CAPTURE GROSS WEIGHT
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Button
+              onClick={() => handleActionClick(entry, "capture-gross-weight")}
+              className="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 h-8"
+            >
+              CAPTURE GROSS WEIGHT
+            </Button>
+            <Badge className="bg-green-100 text-green-700 text-xs">
+              Loading Complete
+            </Badge>
+          </div>
         )
       case "gross-weight-captured":
         return (
@@ -313,7 +546,7 @@ export default function GateManagementPage() {
 
   // Define which statuses belong to each stage
   const createdStatuses = ["not-started"]
-  const inProgressStatuses = ["gate-in", "gate-pass-generated", "tare-weight-captured", "loading", "gross-weight-captured", "gate-out"]
+  const inProgressStatuses = ["gate-in", "gate-pass-generated", "tare-weight-captured", "loading-in-dock", "loading", "gross-weight-captured", "gate-out"]
   const completedStatuses = ["completed"]
   const rejectedStatuses = ["rejected"]
   const cancelledStatuses = ["cancelled"]
@@ -368,9 +601,114 @@ export default function GateManagementPage() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <Button className="bg-blue-600 hover:bg-blue-700 text-white">
-                <Plus className="h-4 w-4 mr-2" />
-                ADD VEHICLE
+              <Dialog open={isAddVehicleOpen} onOpenChange={setIsAddVehicleOpen}>
+                <DialogTrigger asChild>
+                  <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                    <Plus className="h-4 w-4 mr-2" />
+                    ADD VEHICLE
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Add New Vehicle</DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="vehicleNumber" className="text-right">
+                        Vehicle No.*
+                      </Label>
+                      <Input
+                        id="vehicleNumber"
+                        value={newVehicleData.vehicleNumber}
+                        onChange={(e) => setNewVehicleData(prev => ({...prev, vehicleNumber: e.target.value}))}
+                        className="col-span-3"
+                        placeholder="e.g., KA01AB1234"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="driverName" className="text-right">
+                        Driver Name*
+                      </Label>
+                      <Input
+                        id="driverName"
+                        value={newVehicleData.driverName}
+                        onChange={(e) => setNewVehicleData(prev => ({...prev, driverName: e.target.value}))}
+                        className="col-span-3"
+                        placeholder="e.g., Rajesh Kumar"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="driverPhone" className="text-right">
+                        Driver Phone*
+                      </Label>
+                      <Input
+                        id="driverPhone"
+                        value={newVehicleData.driverPhone}
+                        onChange={(e) => setNewVehicleData(prev => ({...prev, driverPhone: e.target.value}))}
+                        className="col-span-3"
+                        placeholder="e.g., 9876543210"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="transporter" className="text-right">
+                        Transporter
+                      </Label>
+                      <Input
+                        id="transporter"
+                        value={newVehicleData.transporter}
+                        onChange={(e) => setNewVehicleData(prev => ({...prev, transporter: e.target.value}))}
+                        className="col-span-3"
+                        placeholder="e.g., ABC Transport Ltd"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="origin" className="text-right">
+                        Origin
+                      </Label>
+                      <Input
+                        id="origin"
+                        value={newVehicleData.origin}
+                        onChange={(e) => setNewVehicleData(prev => ({...prev, origin: e.target.value}))}
+                        className="col-span-3"
+                        placeholder="e.g., Delhi"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="destination" className="text-right">
+                        Destination
+                      </Label>
+                      <Input
+                        id="destination"
+                        value={newVehicleData.destination}
+                        onChange={(e) => setNewVehicleData(prev => ({...prev, destination: e.target.value}))}
+                        className="col-span-3"
+                        placeholder="e.g., Mumbai"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end space-x-2">
+                    <Button variant="outline" onClick={() => setIsAddVehicleOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={addNewVehicle} className="bg-blue-600 hover:bg-blue-700 text-white">
+                      Add Vehicle
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              <Button 
+                onClick={addQuickTestVehicle}
+                variant="outline" 
+                className="bg-green-50 border-green-300 text-green-700 hover:bg-green-100"
+              >
+                QUICK ADD
+              </Button>
+              <Button 
+                onClick={resetData}
+                variant="outline" 
+                className="bg-yellow-50 border-yellow-300 text-yellow-700 hover:bg-yellow-100"
+              >
+                RESET DATA
               </Button>
               <Search className="h-5 w-5 text-gray-400" />
               <div className="bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm">
